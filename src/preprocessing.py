@@ -142,15 +142,19 @@ def preprocess_data(df, balance=False, target_column=None):
 # 9. İşlenmiş Verilerin Kaydedilmesi
 if __name__ == "__main__":
     # Dosya yolları
-    data_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\raw_data\train.csv'
-    save_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_train.csv'
+    train_data_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\raw_data\train.csv'
+    train_save_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_train.csv'
+    test_data_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\raw_data\test.csv'
+    test_save_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_test.csv'
 
-    # Veriyi yükleme
-    df = load_data(data_path)
+    # Eğitim verisini yükleme ve işleme
+    train_df = load_data(train_data_path)
+    train_df_processed = preprocess_data(train_df, balance=True, target_column='value_increased')
+    train_df_processed.to_csv(train_save_path, index=False)
+    logging.info("Eğitim verisi başarıyla işlendi ve kaydedildi.")
 
-    # Veri ön işleme (SMOTE opsiyonel olarak etkinleştirilebilir)
-    df_processed = preprocess_data(df, balance=True, target_column='value_increased')
-
-    # İşlenmiş veriyi kaydetme
-    df_processed.to_csv(save_path, index=False)
-    logging.info("Veri başarıyla işlendi ve kaydedildi.")
+    # Test verisini yükleme ve işleme
+    test_df = load_data(test_data_path)
+    test_df_processed = preprocess_data(test_df)
+    test_df_processed.to_csv(test_save_path, index=False)
+    logging.info("Test verisi başarıyla işlendi ve kaydedildi.")
