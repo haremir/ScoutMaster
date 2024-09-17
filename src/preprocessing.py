@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from sklearn.impute import SimpleImputer
+from sklearn.impute import KNNImputer, SimpleImputer
 from imblearn.over_sampling import SMOTE
 import logging
 import warnings
@@ -17,28 +17,38 @@ def load_data(file_path):
     logging.info("Veri yükleniyor...")
     return pd.read_csv(file_path)
 
-# 2. Eksik Değerleri Doldurma ve Veri Temizleme
-def clean_data(df):
+# 2. Eksik Değerleri KNN ile Doldurma ve Veri Temizleme
+def clean_data_knn(df):
     """
-    Eksik değerleri doldurur ve gerekli veri temizleme adımlarını uygular.
-    Sürekli (sayısal) ve kategorik sütunlar için uygun doldurma stratejileri kullanılır.
+    Eksik değerleri KNN algoritması ile doldurur ve gerekli veri temizleme adımlarını uygular.
     """
-    logging.info("Veri temizleniyor...")
+    logging.info("Veri KNN ile temizleniyor...")
+
     # Yükseklik ve ağırlık birimlerini temizleme ve sayısal hale dönüştürme
-    df['Height'] = df['Height'].apply(lambda x: int(str(x).replace(' CM', '')) if isinstance(x, str) else x)
-    df['Weight'] = df['Weight'].apply(lambda x: int(str(x).replace(' KG', '')) if isinstance(x, str) else x)
+    df['Height'] = df['Height'].apply(lambda x: str(x).replace(' CM', '') if isinstance(x, str) else x)
+    df['Weight'] = df['Weight'].apply(lambda x: str(x).replace(' KG', '') if isinstance(x, str) else x)
 
-    # Sürekli ve kategorik değişkenlerde eksik değerleri doldurma
-    continuous_cols = ['Height', 'Weight']  # Sürekli değişkenler
-    categorical_cols = ['Foot']  # Kategorik değişkenler
+    # 'Height' ve 'Weight' sütunlarını sayısal veri tipine dönüştürme
+    df['Height'] = pd.to_numeric(df['Height'], errors='coerce')
+    df['Weight'] = pd.to_numeric(df['Weight'], errors='coerce')
 
-    # Sürekli değişkenlerde medyan ile doldurma
-    imputer_cont = SimpleImputer(strategy='median')
-    df.loc[:, continuous_cols] = imputer_cont.fit_transform(df[continuous_cols])
+    # Kategorik değişkenleri kodlama öncesi eksik değerleri doldurmak için
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    if len(categorical_cols) > 0:
+        imputer_cat = SimpleImputer(strategy='most_frequent')
+        df[categorical_cols] = imputer_cat.fit_transform(df[categorical_cols])
 
-    # Kategorik değişkenlerde mod ile doldurma (en sık görülen değer)
-    imputer_cat = SimpleImputer(strategy='most_frequent')
-    df.loc[:, categorical_cols] = imputer_cat.fit_transform(df[categorical_cols])
+    # Kategorik değişkenleri sayısal hale getirme (Label Encoding)
+    le = LabelEncoder()
+    for col in categorical_cols:
+        df[col] = le.fit_transform(df[col])
+
+    # KNN Imputer için sayısal sütunları seçme
+    numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+
+    # KNN Imputer uygulama
+    imputer = KNNImputer(n_neighbors=5)
+    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
 
     return df
 
@@ -48,9 +58,7 @@ def encode_categorical(df):
     Kategorik değişkenleri sayısal hale getirir.
     Örneğin, 'Foot' değişkeni için sağ/sol ayak bilgisi 0 ve 1 olarak kodlanır.
     """
-    logging.info("Kategorik veriler kodlanıyor...")
-    le = LabelEncoder()
-    df['Foot'] = le.fit_transform(df['Foot'])  # Sağ/sol ayak için sayısal değer atama
+    # Bu adımı clean_data_knn içinde yaptığımız için tekrar yapmamıza gerek yok
     return df
 
 # 4. Ölçeklendirme (Normalization)
@@ -90,13 +98,13 @@ def feature_engineering(df):
     df['BMI'] = df['Weight'] / (df['Height'] / 100) ** 2
     return df
 
-# 7. Dengesiz Verileri Dengeleme (Optional)
+# 7. Dengesiz Verileri Dengeleme
 def balance_data(df, target_column):
     """
     SMOTE kullanarak dengesiz sınıfları dengeler.
     Özellikle sınıflar arasında ciddi bir dengesizlik varsa, modelin daha iyi öğrenebilmesi için kullanılır.
     """
-    logging.info("Veriler dengeleniyor...")
+    logging.info("Veriler SMOTE ile dengeleniyor...")
     smote = SMOTE()
     X = df.drop(target_column, axis=1)  # Hedef sütunu hariç tüm sütunlar
     y = df[target_column]  # Hedef sütun (bağımlı değişken)
@@ -105,17 +113,16 @@ def balance_data(df, target_column):
     return df_resampled
 
 # 8. Ana Veri Ön İşleme Fonksiyonu
-def preprocess_data(df):
+def preprocess_data(df, balance=False, target_column=None):
     """
-    Tüm veri ön işleme adımlarını çalıştırır. 
-    Bu adımlar: eksik değer doldurma, kategorik verilerin kodlanması, aykırı değerlerin çıkarılması, 
+    Tüm veri ön işleme adımlarını çalıştırır.
+    Bu adımlar: eksik değer doldurma, kategorik verilerin kodlanması, aykırı değerlerin çıkarılması,
     ölçeklendirme ve yeni özellikler üretmeyi içerir.
     """
     # 1. Temizlik adımları (eksik değer doldurma ve birim dönüşümü)
-    df = clean_data(df)
-    
-    # 2. Kategorik verileri kodlama
-    df = encode_categorical(df)
+    df = clean_data_knn(df)
+
+    # 2. Kategorik verileri kodlama (clean_data_knn içinde yapıldı)
 
     # 3. Aykırı değerlerin çıkarılması (örnek: Height)
     df = remove_outliers(df, 'Height')
@@ -125,6 +132,10 @@ def preprocess_data(df):
 
     # 5. Ölçeklendirme (Height, Weight ve BMI sütunlarını ölçeklendiriyoruz)
     df = scale_data(df, ['Height', 'Weight', 'BMI'])
+
+    # 6. Opsiyonel: Veri dengesizse SMOTE ile dengeleme
+    if balance and target_column:
+        df = balance_data(df, target_column)
 
     return df
 
@@ -137,8 +148,8 @@ if __name__ == "__main__":
     # Veriyi yükleme
     df = load_data(data_path)
 
-    # Veri ön işleme
-    df_processed = preprocess_data(df)
+    # Veri ön işleme (SMOTE opsiyonel olarak etkinleştirilebilir)
+    df_processed = preprocess_data(df, balance=True, target_column='value_increased')
 
     # İşlenmiş veriyi kaydetme
     df_processed.to_csv(save_path, index=False)
