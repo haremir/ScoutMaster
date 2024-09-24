@@ -19,9 +19,6 @@ def load_data(file_path):
 
 # 2. Eksik Değerleri KNN ile Doldurma ve Veri Temizleme
 def clean_data_knn(df):
-    """
-    Eksik değerleri KNN algoritması ile doldurur ve gerekli veri temizleme adımlarını uygular.
-    """
     logging.info("Veri KNN ile temizleniyor...")
 
     # Yükseklik ve ağırlık birimlerini temizleme ve sayısal hale dönüştürme
@@ -52,58 +49,21 @@ def clean_data_knn(df):
 
     return df
 
-# 3. Kategorik Verilerin Kodlanması
-def encode_categorical(df):
-    """
-    Kategorik değişkenleri sayısal hale getirir.
-    Örneğin, 'Foot' değişkeni için sağ/sol ayak bilgisi 0 ve 1 olarak kodlanır.
-    """
-    # Bu adımı clean_data_knn içinde yaptığımız için tekrar yapmamıza gerek yok
-    return df
-
 # 4. Ölçeklendirme (Normalization)
 def scale_data(df, columns):
-    """
-    Sayısal verileri belirli bir aralığa (0-1) ölçeklendirir.
-    Özellikle modelleme aşamasında verilerin aynı ölçekte olmasını sağlamak için gereklidir.
-    """
     logging.info("Veriler ölçeklendiriliyor...")
     scaler = MinMaxScaler()
     df.loc[:, columns] = scaler.fit_transform(df[columns])
     return df
 
-# 5. Aykırı Değerlerin Kontrolü
-def remove_outliers(df, column):
-    """
-    IQR yöntemiyle aykırı değerleri belirler ve çıkarır.
-    Özellikle aşırı büyük veya küçük değerlerin modeli olumsuz etkilemesini önlemek için kullanılır.
-    """
-    logging.info(f"Aykırı değerler çıkarılıyor: {column}...")
-    Q1 = df[column].quantile(0.25)  # 1. Çeyrek
-    Q3 = df[column].quantile(0.75)  # 3. Çeyrek
-    IQR = Q3 - Q1  # Çeyrekler arası fark
-    lower_bound = Q1 - 1.5 * IQR  # Alt sınır
-    upper_bound = Q3 + 1.5 * IQR  # Üst sınır
-    df = df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]  # Aykırı değerleri çıkar
-    return df
-
 # 6. Yeni Özellikler Üretme
 def feature_engineering(df):
-    """
-    Yeni özellikler üretir. Örneğin, 'BMI' (vücut kitle indeksi) gibi yeni değişkenler eklenir.
-    Yeni özellikler, modelin daha iyi öğrenmesini sağlayabilir.
-    """
     logging.info("Yeni özellikler üretiliyor...")
-    # BMI (Vücut Kitle İndeksi) hesaplama
     df['BMI'] = df['Weight'] / (df['Height'] / 100) ** 2
     return df
 
 # 7. Dengesiz Verileri Dengeleme
 def balance_data(df, target_column):
-    """
-    SMOTE kullanarak dengesiz sınıfları dengeler.
-    Özellikle sınıflar arasında ciddi bir dengesizlik varsa, modelin daha iyi öğrenebilmesi için kullanılır.
-    """
     logging.info("Veriler SMOTE ile dengeleniyor...")
     smote = SMOTE()
     X = df.drop(target_column, axis=1)  # Hedef sütunu hariç tüm sütunlar
@@ -114,26 +74,15 @@ def balance_data(df, target_column):
 
 # 8. Ana Veri Ön İşleme Fonksiyonu
 def preprocess_data(df, balance=False, target_column=None):
-    """
-    Tüm veri ön işleme adımlarını çalıştırır.
-    Bu adımlar: eksik değer doldurma, kategorik verilerin kodlanması, aykırı değerlerin çıkarılması,
-    ölçeklendirme ve yeni özellikler üretmeyi içerir.
-    """
-    # 1. Temizlik adımları (eksik değer doldurma ve birim dönüşümü)
     df = clean_data_knn(df)
-
-    # 2. Kategorik verileri kodlama (clean_data_knn içinde yapıldı)
-
-    # 3. Aykırı değerlerin çıkarılması (örnek: Height)
-    df = remove_outliers(df, 'Height')
-
-    # 4. Özellik mühendisliği (BMI ekleme)
+    
+    # Özellik mühendisliği (BMI ekleme)
     df = feature_engineering(df)
 
-    # 5. Ölçeklendirme (Height, Weight ve BMI sütunlarını ölçeklendiriyoruz)
+    # Ölçeklendirme (Height, Weight ve BMI sütunlarını ölçeklendiriyoruz)
     df = scale_data(df, ['Height', 'Weight', 'BMI'])
 
-    # 6. Opsiyonel: Veri dengesizse SMOTE ile dengeleme
+    # Opsiyonel: Veri dengesizse SMOTE ile dengeleme
     if balance and target_column:
         df = balance_data(df, target_column)
 
