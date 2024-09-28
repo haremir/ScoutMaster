@@ -1,109 +1,101 @@
 import pandas as pd
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from xgboost import XGBClassifier
-from sklearn.model_selection import cross_val_score, RandomizedSearchCV
-from sklearn.metrics import f1_score, confusion_matrix, classification_report
-from sklearn.model_selection import train_test_split
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import f1_score
 from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 import logging
+import warnings
 
-# Log ayarları
+# Sadece hata mesajlarını göster
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Uyarıları tamamen bastır
+warnings.filterwarnings('ignore')
 
-def load_data(train_path, test_path):
-    """Verileri yükler."""
+def load_and_preprocess_data(train_path, test_path):
     train_data = pd.read_csv(train_path)
     test_data = pd.read_csv(test_path)
     
-    # Eğitim ve test verilerinden id sütununu çıkarıyoruz
     X_train = train_data.drop(columns=['value_increased', 'id'])
     y_train = train_data['value_increased']
     X_test = test_data.drop(columns=['id'])
     
     return X_train, y_train, X_test, test_data
 
-def smote_oversample(X, y):
-    """SMOTE ile sınıf dengesizliği giderilir."""
-    sm = SMOTE(random_state=42)
-    X_res, y_res = sm.fit_resample(X, y)
-    return X_res, y_res
+def create_balanced_model(model, sampler=SMOTE(random_state=42)):
+    return Pipeline([
+        ('sampler', sampler),
+        ('classifier', model)
+    ])
 
-def evaluate_model_with_kfolds(model, X, y, cv=5):
-    """K-Folds ile modelin başarı metriklerini döner."""
-    f1_scores = cross_val_score(model, X, y, cv=cv, scoring='f1')
-    logging.info(f"{model.__class__.__name__} - F1 Skorları: {f1_scores}")
-    return f1_scores.mean()
-
-def make_predictions(model, test_data):
-    """Model ile test verisinde tahmin yapar."""
-    predictions = model.predict(test_data)
-    return predictions
-
-def save_submission(predictions, test_data, submission_path):
-    """Tahminleri ve test verisini kullanarak sonuçları kaydeder."""
-    submission = pd.DataFrame({
-        'id': test_data['id'],  # id'yi koruyoruz çünkü gönderim dosyasında olmalı
-        'value_increased': predictions
-    })
-    submission.to_csv(submission_path, index=False)
-    logging.info(f"Sonuçlar {submission_path} dosyasına kaydedildi.")
-
-def hyperparameter_optimization(X, y):
-    """RandomizedSearchCV ile hyperparametre optimizasyonu."""
-    param_dist = {
-        "n_estimators": [100, 200, 300],
-        "max_depth": [3, 5, 10],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
-        "bootstrap": [True, False]
-    }
-
-    model = RandomForestClassifier(random_state=42)
-    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=10, cv=3, random_state=42, n_jobs=-1)
-    random_search.fit(X, y)
+def evaluate_model(model, X, y, cv=5):
+    skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+    f1_scores = []
     
-    logging.info(f"En iyi parametreler: {random_search.best_params_}")
-    return random_search.best_estimator_
+    for train_index, val_index in skf.split(X, y):
+        X_train, X_val = X.iloc[train_index], X.iloc[val_index]
+        y_train, y_val = y.iloc[train_index], y.iloc[val_index]
+        
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_val)
+        f1_scores.append(f1_score(y_val, y_pred))
+    
+    return np.mean(f1_scores)
 
-def train_and_evaluate_models(X, y):
-    """Birden fazla modeli eğit ve değerlendir."""
-    models = {
-        "DecisionTree": DecisionTreeClassifier(random_state=42),
-        "RandomForest": RandomForestClassifier(random_state=42),
-        "GradientBoosting": GradientBoostingClassifier(random_state=42),
-        "XGBoost": XGBClassifier(random_state=42)
-    }
-    
-    model_scores = {}
-    
-    for name, model in models.items():
-        logging.info(f"{name} modeli eğitiliyor...")
-        score = evaluate_model_with_kfolds(model, X, y)
-        model_scores[name] = score
-        logging.info(f"{name} - Ortalama F1 Skoru: {score}")
-    
-    return models, model_scores
+def create_ensemble_model():
+    models = [
+        ('rf', RandomForestClassifier(class_weight='balanced', n_estimators=200, random_state=42)),
+        ('gb', GradientBoostingClassifier(random_state=42)),
+        ('xgb', XGBClassifier(scale_pos_weight=10, random_state=42)),
+        ('lgbm', LGBMClassifier(class_weight='balanced', random_state=42, verbose=-1))  # verbose=-1 eklendi
+    ]
+    return VotingClassifier(estimators=models, voting='soft')
+
+def adjust_threshold(y_proba, threshold=0.2):
+    return (y_proba >= threshold).astype(int)
 
 def main():
-    # Verileri yükle
-    X_train, y_train, X_test, test_data = load_data(
-        r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_train.csv',
-        r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_test.csv'
-    )
-
-    # SMOTE ile sınıf dengesizliği giderme
-    X_train_res, y_train_res = smote_oversample(X_train, y_train)
-
-    # Hyperparametre optimizasyonu
-    best_rf_model = hyperparameter_optimization(X_train_res, y_train_res)
-
-    # Tahmin yap
-    best_rf_model.fit(X_train_res, y_train_res)
-    predictions = make_predictions(best_rf_model, X_test)
-
-    # Sonuçları kaydet
-    save_submission(predictions, test_data, r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\raw_data\best_model_submission.csv')
+    train_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_train.csv'
+    test_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\processed_data\processed_test.csv'
+    X_train, y_train, X_test, test_data = load_and_preprocess_data(train_path, test_path)
+    
+    logging.info("Data loaded and preprocessed.")
+    
+    # Create and evaluate balanced models
+    models = [
+        create_balanced_model(RandomForestClassifier(class_weight='balanced', n_estimators=200, random_state=42)),
+        create_balanced_model(GradientBoostingClassifier(random_state=42)),
+        create_balanced_model(XGBClassifier(scale_pos_weight=10, random_state=42)),
+        create_balanced_model(LGBMClassifier(class_weight='balanced', random_state=42, verbose=-1))  # verbose=-1 eklendi
+    ]
+    
+    for model in models:
+        f1 = evaluate_model(model, X_train, y_train)
+        logging.info(f"{model['classifier'].__class__.__name__} F1 Score: {f1}")
+    
+    # Create and train ensemble model
+    ensemble = create_ensemble_model()
+    ensemble.fit(X_train, y_train)
+    logging.info("Ensemble model trained.")
+    
+    # Make predictions with lower threshold
+    y_proba = ensemble.predict_proba(X_test)[:, 1]
+    y_pred = adjust_threshold(y_proba, threshold=0.2)
+    
+    # Save results
+    submission = pd.DataFrame({'id': test_data['id'], 'value_increased': y_pred})
+    submission_path = r'C:\Users\emirh\Desktop\DOSYALAR\veri_bilimi\scoutmaster\data\raw_data\ensemble_submission.csv'
+    submission.to_csv(submission_path, index=False)
+    
+    # Log completion message
+    logging.info(f"Results saved to {submission_path}")
+    
+    # Log class distribution in predictions
+    pred_distribution = pd.Series(y_pred).value_counts()
+    logging.info(f"Prediction distribution:\n{pred_distribution}")
 
 if __name__ == "__main__":
     main()
