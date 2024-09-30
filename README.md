@@ -61,7 +61,9 @@ Projede kullanılan veri setleri şunlardır:
    - Pandas
    - NumPy
    - Scikit-learn
-   - Diğer gerekli kütüphaneler
+   - PyCaret
+   - Catboost
+   - Xgboost
 
 2. **Kurulum:**
    ```bash
